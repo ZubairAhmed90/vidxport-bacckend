@@ -560,14 +560,6 @@ const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 const PORT = Number(process.env.PORT || 8080);
 const MAX_DOWNLOAD_MB = Number(process.env.MAX_DOWNLOAD_MB || 250);
 const MAX_DOWNLOAD_BYTES = MAX_DOWNLOAD_MB * 1024 * 1024;
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
-const TURNSTILE_ACTION = process.env.TURNSTILE_ACTION || "download";
-const TURNSTILE_HOSTNAMES = new Set(
-  (process.env.TURNSTILE_HOSTNAMES || "")
-    .split(",")
-    .map((h) => h.trim().toLowerCase())
-    .filter(Boolean)
-);
 
 // Short-lived in-memory store for resolved download tokens (one-time use, 2 min TTL)
 const downloadTokens = new Map();
@@ -656,54 +648,6 @@ function isHttpUrl(value) {
   }
 }
 
-async function verifyTurnstile(token, remoteip) {
-  const secret = TURNSTILE_SECRET_KEY;
-  if (!secret) return { ok: false, reason: "Turnstile is not configured on the server." };
-
-  if (
-    typeof token !== "string" ||
-    token.length === 0 ||
-    token.length > 2048
-  ) {
-    return { ok: false, reason: "Please complete the challenge to continue." };
-  }
-
-  let result;
-  try {
-    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      signal: AbortSignal.timeout(10_000),
-      body: new URLSearchParams({
-        secret,
-        response: token,
-        ...(remoteip ? { remoteip: String(remoteip) } : {})
-      })
-    });
-    if (!res.ok) throw new Error(`siteverify ${res.status}`);
-    result = await res.json();
-  } catch {
-    return { ok: false, reason: "Could not verify the challenge. Please try again." };
-  }
-
-  if (!result.success) {
-    return { ok: false, reason: "Challenge failed. Please try again." };
-  }
-
-  if (result.action !== TURNSTILE_ACTION) {
-    return { ok: false, reason: "Challenge is not valid for this action." };
-  }
-
-  if (
-    TURNSTILE_HOSTNAMES.size > 0 &&
-    !TURNSTILE_HOSTNAMES.has(String(result.hostname || "").toLowerCase())
-  ) {
-    return { ok: false, reason: "Challenge was completed on an unapproved hostname." };
-  }
-
-  return { ok: true, reason: "" };
-}
-
 /**
  * GET /api/usage
  * Returns HD quota usage for the caller's IP address.
@@ -718,9 +662,7 @@ app.get("/api/usage", (req, res) => {
  * Accepts quality: "SD" (free unlimited) or "HD" (free 2/day, then paid/blocked)
  */
 app.post("/api/resolve", async (req, res) => {
-  const { mediaUrl, quality = "SD", turnstileToken } = req.body || {};
-  const captcha = await verifyTurnstile(turnstileToken, req.ip);
-  if (!captcha.ok) return res.status(403).json({ error: captcha.reason || "Please complete the verification." });
+  const { mediaUrl, quality = "SD" } = req.body || {};
 
   if (!mediaUrl || !isHttpUrl(mediaUrl)) {
     return res.status(400).json({ error: "Please provide a valid HTTP(S) media URL." });
