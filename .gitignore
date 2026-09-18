@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment (contains secrets — never commit)
+.env
+.env.local
+.env.development
+.env.production
+
+# Build output
+dist/
+build/
+
+# Runtime binaries (platform-specific; install on server instead)
+bin/*.exe
+bin/!
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
